@@ -205,6 +205,7 @@ export function HtmlSelector() {
         </Tooltip>
         <Button
           size="sm"
+          className="text-xs"
           variant={selectMode ? "danger" : "primary"}
           onPress={(e) => {
             (e.target as HTMLElement)?.blur?.();

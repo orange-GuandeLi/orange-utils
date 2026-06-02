@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { Button, Tooltip } from "@heroui/react";
-import { Code2, Wrench, PanelLeftClose, PanelLeft } from "lucide-react";
+import { Code2, Wrench, PanelLeftClose, PanelLeft, Send } from "lucide-react";
 import { HtmlSelector } from "./tools/html-selector";
+import { ApiRequest } from "./tools/api-request";
 
 const TOOLS = [
   {
@@ -10,6 +11,13 @@ const TOOLS = [
     description: "可视化选择 HTML 元素",
     icon: Code2,
     component: HtmlSelector,
+  },
+  {
+    id: "api-request",
+    name: "API Request",
+    description: "发送 HTTP 请求，支持模板变量",
+    icon: Send,
+    component: ApiRequest,
   },
 ];
 

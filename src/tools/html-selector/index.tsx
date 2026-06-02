@@ -1,11 +1,12 @@
 import { useState, useRef, useCallback } from "react";
-import { Button, Card, Chip, Tooltip } from "@heroui/react";
+import { Button, Chip, Tooltip, Modal } from "@heroui/react";
 import {
   SquareDashedMousePointer,
   Copy,
-  RotateCcw,
   Code2,
   Eye,
+  GripVertical,
+  Check,
 } from "lucide-react";
 import { CodeEditor } from "./CodeEditor";
 import {
@@ -13,19 +14,90 @@ import {
   type SelectionInfo,
 } from "./hooks/useIframeSelector";
 
+// 可复制的信息项
+function CopyField({ label, value }: { label: string; value: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(value);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+
+  return (
+    <div className="flex items-start gap-3 py-2">
+      <span className="text-xs text-muted w-20 shrink-0 pt-0.5">{label}</span>
+      <span className="text-xs text-foreground font-mono flex-1 break-all min-w-0">
+        {value || "-"}
+      </span>
+      <Tooltip delay={0}>
+        <Button
+          isIconOnly
+          size="sm"
+          variant="ghost"
+          className="shrink-0"
+          onPress={handleCopy}
+        >
+          {copied ? (
+            <Check size={12} className="text-success" />
+          ) : (
+            <Copy size={12} />
+          )}
+        </Button>
+        <Tooltip.Content>{copied ? "已复制" : "复制"}</Tooltip.Content>
+      </Tooltip>
+    </div>
+  );
+}
+
 export function HtmlSelector() {
   const [html, setHtml] = useState(SAMPLE_HTML);
   const [selectMode, setSelectMode] = useState(false);
   const [selectedInfo, setSelectedInfo] = useState<SelectionInfo | null>(null);
+  const [modalOpen, setModalOpen] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
+
+  // 分隔条
+  const [editorWidth, setEditorWidth] = useState(50);
+  const [isDragging, setIsDragging] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // 预览宽度 (px)
+  const [previewPx, setPreviewPx] = useState(0);
+
+  const updatePreviewWidth = useCallback(() => {
+    if (!containerRef.current) return;
+    const containerW = containerRef.current.getBoundingClientRect().width;
+    const dividerW = 6;
+    setPreviewPx(Math.round(containerW * (1 - editorWidth / 100) - dividerW));
+  }, [editorWidth]);
+
+  const resizeObserverRef = useRef<ResizeObserver | null>(null);
+  const setContainerRef = useCallback(
+    (node: HTMLDivElement | null) => {
+      if (resizeObserverRef.current) resizeObserverRef.current.disconnect();
+      if (node) {
+        (
+          containerRef as React.MutableRefObject<HTMLDivElement | null>
+        ).current = node;
+        const ro = new ResizeObserver(() => updatePreviewWidth());
+        ro.observe(node);
+        resizeObserverRef.current = ro;
+        updatePreviewWidth();
+      }
+    },
+    [updatePreviewWidth],
+  );
 
   const handleSelected = useCallback((info: SelectionInfo) => {
     setSelectedInfo(info);
+    setModalOpen(true);
   }, []);
 
   const handleExit = useCallback(() => {
     setSelectMode(false);
     setSelectedInfo(null);
+    setModalOpen(false);
   }, []);
 
   useIframeSelector({
@@ -35,11 +107,34 @@ export function HtmlSelector() {
     onExit: handleExit,
   });
 
-  const handleCopy = () => {
-    if (selectedInfo) {
-      navigator.clipboard.writeText(selectedInfo.selector);
-    }
-  };
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    document.body.style.pointerEvents = "none";
+
+    const onMouseMove = (e: MouseEvent) => {
+      if (!containerRef.current) return;
+      const rect = containerRef.current.getBoundingClientRect();
+      const percent = ((e.clientX - rect.left) / rect.width) * 100;
+      setEditorWidth(Math.min(80, Math.max(20, percent)));
+      const dividerW = 6;
+      setPreviewPx(Math.round(rect.width * (1 - percent / 100) - dividerW));
+    };
+
+    const onMouseUp = () => {
+      setIsDragging(false);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      document.body.style.pointerEvents = "";
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onMouseUp);
+    };
+
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
+  }, []);
 
   return (
     <div className="h-full flex flex-col bg-background text-foreground">
@@ -47,19 +142,22 @@ export function HtmlSelector() {
       <header className="h-14 border-b border-separator flex items-center px-5 gap-3 shrink-0">
         <h1 className="text-sm font-semibold">HTML Selector</h1>
         <span className="text-xs text-muted">
-          粘贴 HTML → 预览 → 选择元素 → Console 输出
+          粘贴 HTML → 实时预览 → 选择元素 → 查看信息
         </span>
         <div className="flex-1" />
+        <Chip size="sm" variant="soft" color="default" className="font-mono">
+          <Chip.Label>{previewPx}px</Chip.Label>
+        </Chip>
         <Button
           size="sm"
-          className="text-xs"
           variant={selectMode ? "danger" : "primary"}
+          className="text-xs"
           onPress={(e) => {
-            // 点击后立即失焦，防止 Enter 重复触发
             (e.target as HTMLElement)?.blur?.();
             if (selectMode) {
               setSelectMode(false);
               setSelectedInfo(null);
+              setModalOpen(false);
             } else {
               setSelectMode(true);
               setSelectedInfo(null);
@@ -74,28 +172,31 @@ export function HtmlSelector() {
             <Chip.Label>Shift 切父级 / Tab 切重叠</Chip.Label>
           </Chip>
         )}
-        {selectedInfo && (
+        {selectedInfo && selectMode && (
           <Tooltip delay={0}>
             <Button
               isIconOnly
               size="sm"
               variant="ghost"
-              onPress={() => {
-                setSelectMode(false);
-                setSelectedInfo(null);
-              }}
+              onPress={() => setModalOpen(true)}
             >
-              <RotateCcw size={14} />
+              <Eye size={14} />
             </Button>
-            <Tooltip.Content>重置选择</Tooltip.Content>
+            <Tooltip.Content>查看选中信息</Tooltip.Content>
           </Tooltip>
         )}
       </header>
 
       {/* Main */}
-      <div className="flex-1 flex min-h-0">
+      <div
+        ref={setContainerRef}
+        className="flex-1 flex min-h-0 relative select-none"
+      >
         {/* 左: HTML 输入 */}
-        <div className="w-100 border-r border-separator flex flex-col shrink-0">
+        <div
+          className="border-r border-separator flex flex-col shrink-0 overflow-hidden"
+          style={{ width: `${editorWidth}%` }}
+        >
           <div className="px-4 py-2.5 border-b border-separator flex items-center gap-2">
             <Code2 size={14} className="text-muted" />
             <span className="text-xs text-muted font-medium">HTML Input</span>
@@ -107,12 +208,23 @@ export function HtmlSelector() {
                 setHtml(v);
                 setSelectMode(false);
                 setSelectedInfo(null);
+                setModalOpen(false);
               }}
             />
           </div>
         </div>
 
-        {/* 右: 预览 + 详情 */}
+        {/* 分隔条 */}
+        <div
+          className={`w-1.5 shrink-0 flex items-center justify-center cursor-col-resize hover:bg-accent/20 transition-colors ${
+            isDragging ? "bg-accent/30" : "bg-surface"
+          }`}
+          onMouseDown={handleMouseDown}
+        >
+          <GripVertical size={12} className="text-muted" />
+        </div>
+
+        {/* 右: 预览 */}
         <div className="flex-1 flex flex-col min-w-0">
           <div className="flex-1 min-h-0 bg-surface relative">
             <iframe
@@ -133,107 +245,56 @@ export function HtmlSelector() {
                 </Chip>
               </div>
             )}
-            {selectMode && selectedInfo && (
-              <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10">
-                <Chip size="lg" variant="primary" color="success">
-                  <Chip.Label>
-                    ✓ 已选中 {selectedInfo.tagName}
-                    {selectedInfo.id ? `#${selectedInfo.id}` : ""}
-                  </Chip.Label>
-                </Chip>
-              </div>
-            )}
           </div>
-
-          {selectedInfo && (
-            <div className="h-55 border-t border-separator shrink-0 overflow-auto">
-              <Card className="h-full rounded-none shadow-none border-0">
-                <Card.Header className="px-4 py-2 flex items-center gap-2">
-                  <Eye size={14} className="text-success" />
-                  <span className="text-xs font-medium text-muted">
-                    Selected
-                  </span>
-                  <Chip
-                    size="sm"
-                    variant="soft"
-                    color="success"
-                    className="font-mono"
-                  >
-                    <Chip.Label>{selectedInfo.selector}</Chip.Label>
-                  </Chip>
-                  <div className="flex-1" />
-                  <Tooltip delay={0}>
-                    <Button
-                      isIconOnly
-                      size="sm"
-                      variant="ghost"
-                      onPress={handleCopy}
-                    >
-                      <Copy size={12} />
-                    </Button>
-                    <Tooltip.Content>复制选择器</Tooltip.Content>
-                  </Tooltip>
-                </Card.Header>
-                <Card.Content className="px-4 py-2 text-xs font-mono gap-1.5">
-                  <div className="grid grid-cols-2 gap-x-8 gap-y-1 text-muted">
-                    <div>
-                      tag:{" "}
-                      <span className="text-foreground">
-                        {selectedInfo.tagName}
-                      </span>
-                    </div>
-                    <div>
-                      size:{" "}
-                      <span className="text-foreground">
-                        {selectedInfo.rect.width} × {selectedInfo.rect.height}
-                      </span>
-                    </div>
-                    <div>
-                      id:{" "}
-                      <span className="text-foreground">
-                        {selectedInfo.id || "-"}
-                      </span>
-                    </div>
-                    <div>
-                      class:{" "}
-                      <span className="text-foreground truncate inline-block max-w-70 align-bottom">
-                        {selectedInfo.className || "-"}
-                      </span>
-                    </div>
-                    {selectedInfo.editableType && (
-                      <>
-                        <div>
-                          editable:{" "}
-                          <Chip
-                            size="sm"
-                            variant="soft"
-                            color="warning"
-                            className="font-mono"
-                          >
-                            <Chip.Label>{selectedInfo.editableType}</Chip.Label>
-                          </Chip>
-                        </div>
-                        <div>
-                          value:{" "}
-                          <span className="text-foreground truncate inline-block max-w-70 align-bottom">
-                            {selectedInfo.editableValue}
-                          </span>
-                        </div>
-                      </>
-                    )}
-                  </div>
-                  <div className="mt-1 pt-1 border-t border-separator text-muted">
-                    text:{" "}
-                    <span className="text-foreground">
-                      {selectedInfo.textContent}
-                    </span>
-                  </div>
-                </Card.Content>
-              </Card>
-            </div>
-          )}
         </div>
       </div>
+
+      {/* 选中信息 Modal */}
+      {selectedInfo && (
+        <Modal.Backdrop isOpen={modalOpen} onOpenChange={setModalOpen}>
+          <Modal.Container>
+            <Modal.Dialog className="sm:max-w-lg">
+              <Modal.CloseTrigger />
+              <Modal.Header>
+                <Modal.Icon className="bg-success-soft text-success">
+                  <Eye className="size-5" />
+                </Modal.Icon>
+                <Modal.Heading>选中元素信息</Modal.Heading>
+              </Modal.Header>
+              <Modal.Body>
+                <div className="divide-y divide-separator">
+                  <CopyField label="选择器" value={selectedInfo.selector} />
+                  <CopyField label="标签" value={selectedInfo.tagName} />
+                  <CopyField label="ID" value={selectedInfo.id} />
+                  <CopyField label="Class" value={selectedInfo.className} />
+                  <CopyField
+                    label="尺寸"
+                    value={`${selectedInfo.rect.width} × ${selectedInfo.rect.height}`}
+                  />
+                  <CopyField
+                    label="位置"
+                    value={`top=${selectedInfo.rect.top}, left=${selectedInfo.rect.left}`}
+                  />
+                  {selectedInfo.editableType && (
+                    <>
+                      <CopyField
+                        label="Editable"
+                        value={selectedInfo.editableType}
+                      />
+                      <CopyField
+                        label="Value"
+                        value={selectedInfo.editableValue || ""}
+                      />
+                    </>
+                  )}
+                  <CopyField label="文本" value={selectedInfo.textContent} />
+                  <CopyField label="outerHTML" value={selectedInfo.outerHTML} />
+                </div>
+              </Modal.Body>
+            </Modal.Dialog>
+          </Modal.Container>
+        </Modal.Backdrop>
+      )}
     </div>
   );
 }

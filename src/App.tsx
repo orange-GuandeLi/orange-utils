@@ -42,9 +42,15 @@ export function App() {
               variant="ghost"
               onPress={() => setCollapsed(!collapsed)}
             >
-              {collapsed ? <PanelLeft size={16} /> : <PanelLeftClose size={16} />}
+              {collapsed ? (
+                <PanelLeft size={16} />
+              ) : (
+                <PanelLeftClose size={16} />
+              )}
             </Button>
-            <Tooltip.Content placement="right">{collapsed ? "展开侧边栏" : "收起侧边栏"}</Tooltip.Content>
+            <Tooltip.Content placement="right">
+              {collapsed ? "展开侧边栏" : "收起侧边栏"}
+            </Tooltip.Content>
           </Tooltip>
         </div>
 
@@ -63,9 +69,13 @@ export function App() {
                   onPress={() => setActiveTool(tool.id)}
                 >
                   <Icon size={16} className={isActive ? "text-accent" : ""} />
-                  {!collapsed && <span className="truncate">{tool.name}</span>}
+                  {!collapsed && (
+                    <span className="truncate text-xs">{tool.name}</span>
+                  )}
                 </Button>
-                <Tooltip.Content placement="right">{collapsed ? tool.name : tool.description}</Tooltip.Content>
+                <Tooltip.Content placement="right">
+                  {collapsed ? tool.name : tool.description}
+                </Tooltip.Content>
               </Tooltip>
             );
           })}

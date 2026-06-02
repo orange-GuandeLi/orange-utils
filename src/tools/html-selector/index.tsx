@@ -1,5 +1,5 @@
-import { useState, useRef, useCallback } from "react";
-import { Button, Chip, Tooltip, Modal } from "@heroui/react";
+import { useState, useRef, useCallback, useEffect } from "react";
+import { Button, Chip, Tooltip, Modal, Input, Label, TextField } from "@heroui/react";
 import {
   SquareDashedMousePointer,
   Copy,
@@ -7,23 +7,34 @@ import {
   Eye,
   GripVertical,
   Check,
+  Save,
+  FolderOpen,
+  Trash2,
 } from "lucide-react";
 import { CodeEditor } from "./CodeEditor";
 import {
   useIframeSelector,
   type SelectionInfo,
 } from "./hooks/useIframeSelector";
+import { kvGet, kvSet, kvDelete, kvKeys } from "../../utils/db";
+
+// 保存的数据结构
+type SavedItem = {
+  name: string;
+  html: string;
+  savedAt: number;
+};
+
+const STORAGE_PREFIX = "html-selector:saved:";
 
 // 可复制的信息项
 function CopyField({ label, value }: { label: string; value: string }) {
   const [copied, setCopied] = useState(false);
-
   const handleCopy = () => {
     navigator.clipboard.writeText(value);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   };
-
   return (
     <div className="flex items-start gap-3 py-2">
       <span className="text-xs text-muted w-20 shrink-0 pt-0.5">{label}</span>
@@ -31,18 +42,8 @@ function CopyField({ label, value }: { label: string; value: string }) {
         {value || "-"}
       </span>
       <Tooltip delay={0}>
-        <Button
-          isIconOnly
-          size="sm"
-          variant="ghost"
-          className="shrink-0"
-          onPress={handleCopy}
-        >
-          {copied ? (
-            <Check size={12} className="text-success" />
-          ) : (
-            <Copy size={12} />
-          )}
+        <Button isIconOnly size="sm" variant="ghost" className="shrink-0" onPress={handleCopy}>
+          {copied ? <Check size={12} className="text-success" /> : <Copy size={12} />}
         </Button>
         <Tooltip.Content>{copied ? "已复制" : "复制"}</Tooltip.Content>
       </Tooltip>
@@ -61,9 +62,13 @@ export function HtmlSelector() {
   const [editorWidth, setEditorWidth] = useState(50);
   const [isDragging, setIsDragging] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
-
-  // 预览宽度 (px)
   const [previewPx, setPreviewPx] = useState(0);
+
+  // 保存/加载
+  const [saveModalOpen, setSaveModalOpen] = useState(false);
+  const [loadModalOpen, setLoadModalOpen] = useState(false);
+  const [saveName, setSaveName] = useState("");
+  const [savedItems, setSavedItems] = useState<SavedItem[]>([]);
 
   const updatePreviewWidth = useCallback(() => {
     if (!containerRef.current) return;
@@ -73,21 +78,16 @@ export function HtmlSelector() {
   }, [editorWidth]);
 
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
-  const setContainerRef = useCallback(
-    (node: HTMLDivElement | null) => {
-      if (resizeObserverRef.current) resizeObserverRef.current.disconnect();
-      if (node) {
-        (
-          containerRef as React.MutableRefObject<HTMLDivElement | null>
-        ).current = node;
-        const ro = new ResizeObserver(() => updatePreviewWidth());
-        ro.observe(node);
-        resizeObserverRef.current = ro;
-        updatePreviewWidth();
-      }
-    },
-    [updatePreviewWidth],
-  );
+  const setContainerRef = useCallback((node: HTMLDivElement | null) => {
+    if (resizeObserverRef.current) resizeObserverRef.current.disconnect();
+    if (node) {
+      (containerRef as React.MutableRefObject<HTMLDivElement | null>).current = node;
+      const ro = new ResizeObserver(() => updatePreviewWidth());
+      ro.observe(node);
+      resizeObserverRef.current = ro;
+      updatePreviewWidth();
+    }
+  }, [updatePreviewWidth]);
 
   const handleSelected = useCallback((info: SelectionInfo) => {
     setSelectedInfo(info);
@@ -106,6 +106,49 @@ export function HtmlSelector() {
     onSelected: handleSelected,
     onExit: handleExit,
   });
+
+  // 加载已保存列表
+  const loadSavedList = useCallback(async () => {
+    const keys = await kvKeys();
+    const items: SavedItem[] = [];
+    for (const key of keys) {
+      if (key.startsWith(STORAGE_PREFIX)) {
+        const item = await kvGet<SavedItem>(key);
+        if (item) items.push(item);
+      }
+    }
+    items.sort((a, b) => b.savedAt - a.savedAt);
+    setSavedItems(items);
+  }, []);
+
+  useEffect(() => {
+    if (loadModalOpen) loadSavedList();
+  }, [loadModalOpen, loadSavedList]);
+
+  // 保存
+  const handleSave = async () => {
+    const name = saveName.trim();
+    if (!name) return;
+    const item: SavedItem = { name, html, savedAt: Date.now() };
+    await kvSet(STORAGE_PREFIX + name, item);
+    setSaveModalOpen(false);
+    setSaveName("");
+  };
+
+  // 加载
+  const handleLoad = (item: SavedItem) => {
+    setHtml(item.html);
+    setSelectMode(false);
+    setSelectedInfo(null);
+    setModalOpen(false);
+    setLoadModalOpen(false);
+  };
+
+  // 删除
+  const handleDelete = async (item: SavedItem) => {
+    await kvDelete(STORAGE_PREFIX + item.name);
+    loadSavedList();
+  };
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -139,7 +182,7 @@ export function HtmlSelector() {
   return (
     <div className="h-full flex flex-col bg-background text-foreground">
       {/* Header */}
-      <header className="h-14 border-b border-separator flex items-center px-5 gap-3 shrink-0">
+      <header className="h-14 border-b border-separator flex items-center px-5 gap-2 shrink-0">
         <h1 className="text-sm font-semibold">HTML Selector</h1>
         <span className="text-xs text-muted">
           粘贴 HTML → 实时预览 → 选择元素 → 查看信息
@@ -148,10 +191,21 @@ export function HtmlSelector() {
         <Chip size="sm" variant="soft" color="default" className="font-mono">
           <Chip.Label>{previewPx}px</Chip.Label>
         </Chip>
+        <Tooltip delay={0}>
+          <Button isIconOnly size="sm" variant="ghost" onPress={() => setSaveModalOpen(true)}>
+            <Save size={14} />
+          </Button>
+          <Tooltip.Content>保存</Tooltip.Content>
+        </Tooltip>
+        <Tooltip delay={0}>
+          <Button isIconOnly size="sm" variant="ghost" onPress={() => setLoadModalOpen(true)}>
+            <FolderOpen size={14} />
+          </Button>
+          <Tooltip.Content>加载</Tooltip.Content>
+        </Tooltip>
         <Button
           size="sm"
           variant={selectMode ? "danger" : "primary"}
-          className="text-xs"
           onPress={(e) => {
             (e.target as HTMLElement)?.blur?.();
             if (selectMode) {
@@ -174,12 +228,7 @@ export function HtmlSelector() {
         )}
         {selectedInfo && selectMode && (
           <Tooltip delay={0}>
-            <Button
-              isIconOnly
-              size="sm"
-              variant="ghost"
-              onPress={() => setModalOpen(true)}
-            >
+            <Button isIconOnly size="sm" variant="ghost" onPress={() => setModalOpen(true)}>
               <Eye size={14} />
             </Button>
             <Tooltip.Content>查看选中信息</Tooltip.Content>
@@ -188,11 +237,7 @@ export function HtmlSelector() {
       </header>
 
       {/* Main */}
-      <div
-        ref={setContainerRef}
-        className="flex-1 flex min-h-0 relative select-none"
-      >
-        {/* 左: HTML 输入 */}
+      <div ref={setContainerRef} className="flex-1 flex min-h-0 relative select-none">
         <div
           className="border-r border-separator flex flex-col shrink-0 overflow-hidden"
           style={{ width: `${editorWidth}%` }}
@@ -214,7 +259,6 @@ export function HtmlSelector() {
           </div>
         </div>
 
-        {/* 分隔条 */}
         <div
           className={`w-1.5 shrink-0 flex items-center justify-center cursor-col-resize hover:bg-accent/20 transition-colors ${
             isDragging ? "bg-accent/30" : "bg-surface"
@@ -224,7 +268,6 @@ export function HtmlSelector() {
           <GripVertical size={12} className="text-muted" />
         </div>
 
-        {/* 右: 预览 */}
         <div className="flex-1 flex flex-col min-w-0">
           <div className="flex-1 min-h-0 bg-surface relative">
             <iframe
@@ -235,12 +278,7 @@ export function HtmlSelector() {
             />
             {selectMode && !selectedInfo && (
               <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10">
-                <Chip
-                  size="lg"
-                  variant="primary"
-                  color="danger"
-                  className="animate-pulse"
-                >
+                <Chip size="lg" variant="primary" color="danger" className="animate-pulse">
                   <Chip.Label>点击页面中的元素进行选择</Chip.Label>
                 </Chip>
               </div>
@@ -267,24 +305,12 @@ export function HtmlSelector() {
                   <CopyField label="标签" value={selectedInfo.tagName} />
                   <CopyField label="ID" value={selectedInfo.id} />
                   <CopyField label="Class" value={selectedInfo.className} />
-                  <CopyField
-                    label="尺寸"
-                    value={`${selectedInfo.rect.width} × ${selectedInfo.rect.height}`}
-                  />
-                  <CopyField
-                    label="位置"
-                    value={`top=${selectedInfo.rect.top}, left=${selectedInfo.rect.left}`}
-                  />
+                  <CopyField label="尺寸" value={`${selectedInfo.rect.width} × ${selectedInfo.rect.height}`} />
+                  <CopyField label="位置" value={`top=${selectedInfo.rect.top}, left=${selectedInfo.rect.left}`} />
                   {selectedInfo.editableType && (
                     <>
-                      <CopyField
-                        label="Editable"
-                        value={selectedInfo.editableType}
-                      />
-                      <CopyField
-                        label="Value"
-                        value={selectedInfo.editableValue || ""}
-                      />
+                      <CopyField label="Editable" value={selectedInfo.editableType} />
+                      <CopyField label="Value" value={selectedInfo.editableValue || ""} />
                     </>
                   )}
                   <CopyField label="文本" value={selectedInfo.textContent} />
@@ -295,6 +321,82 @@ export function HtmlSelector() {
           </Modal.Container>
         </Modal.Backdrop>
       )}
+
+      {/* 保存 Modal */}
+      <Modal.Backdrop isOpen={saveModalOpen} onOpenChange={setSaveModalOpen}>
+        <Modal.Container>
+          <Modal.Dialog className="sm:max-w-sm">
+            <Modal.CloseTrigger />
+            <Modal.Header>
+              <Modal.Icon className="bg-accent-soft text-accent">
+                <Save className="size-5" />
+              </Modal.Icon>
+              <Modal.Heading>保存代码</Modal.Heading>
+            </Modal.Header>
+            <Modal.Body>
+              <TextField
+                value={saveName}
+                onChange={setSaveName}
+              >
+                <Label>名称</Label>
+                <Input placeholder="给这次保存起个名字" onKeyDown={(e) => e.key === "Enter" && handleSave()} />
+              </TextField>
+            </Modal.Body>
+            <Modal.Footer>
+              <Button slot="close" variant="secondary">取消</Button>
+              <Button slot="close" onPress={handleSave} isDisabled={!saveName.trim()}>保存</Button>
+            </Modal.Footer>
+          </Modal.Dialog>
+        </Modal.Container>
+      </Modal.Backdrop>
+
+      {/* 加载 Modal */}
+      <Modal.Backdrop isOpen={loadModalOpen} onOpenChange={setLoadModalOpen}>
+        <Modal.Container>
+          <Modal.Dialog className="sm:max-w-md">
+            <Modal.CloseTrigger />
+            <Modal.Header>
+              <Modal.Icon className="bg-accent-soft text-accent">
+                <FolderOpen className="size-5" />
+              </Modal.Icon>
+              <Modal.Heading>加载已保存的代码</Modal.Heading>
+            </Modal.Header>
+            <Modal.Body>
+              {savedItems.length === 0 ? (
+                <p className="text-sm text-muted text-center py-8">暂无保存的代码</p>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  {savedItems.map((item) => (
+                    <div
+                      key={item.name}
+                      className="flex items-center gap-3 p-3 rounded-lg bg-surface-secondary hover:bg-surface-tertiary transition-colors"
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-medium truncate">{item.name}</div>
+                        <div className="text-xs text-muted">
+                          {new Date(item.savedAt).toLocaleString()}
+                        </div>
+                      </div>
+                      <Tooltip delay={0}>
+                        <Button size="sm" variant="secondary" onPress={() => handleLoad(item)}>
+                          加载
+                        </Button>
+                        <Tooltip.Content>加载此代码</Tooltip.Content>
+                      </Tooltip>
+                      <Tooltip delay={0}>
+                        <Button isIconOnly size="sm" variant="ghost" onPress={() => handleDelete(item)}>
+                          <Trash2 size={14} className="text-danger" />
+                        </Button>
+                        <Tooltip.Content>删除</Tooltip.Content>
+                      </Tooltip>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Modal.Body>
+          </Modal.Dialog>
+        </Modal.Container>
+      </Modal.Backdrop>
     </div>
   );
 }

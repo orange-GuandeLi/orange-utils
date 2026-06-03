@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button, Tooltip } from "@heroui/react";
-import { Code2, Wrench, PanelLeftClose, PanelLeft, Send } from "lucide-react";
+import { Code2, Wrench, PanelLeftClose, PanelLeft, Send, Database } from "lucide-react";
 import { HtmlSelector } from "./tools/html-selector";
 import { ApiRequest } from "./tools/api-request";
+import { ResourceManager } from "./tools/resource-manager";
 
 const TOOLS = [
   {
@@ -19,6 +20,13 @@ const TOOLS = [
     icon: Send,
     component: ApiRequest,
   },
+  {
+    id: "resource-manager",
+    name: "资源管理",
+    description: "统一管理所有工具保存的数据",
+    icon: Database,
+    component: ResourceManager,
+  },
 ];
 
 export function App() {
@@ -26,6 +34,18 @@ export function App() {
   const [collapsed, setCollapsed] = useState(false);
   const current = TOOLS.find((t) => t.id === activeTool) || TOOLS[0];
   const ToolComponent = current.component;
+
+  // 监听资源管理页面的跳转请求
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const ce = e as CustomEvent;
+      if (ce.detail && TOOLS.some((t) => t.id === ce.detail)) {
+        setActiveTool(ce.detail);
+      }
+    };
+    window.addEventListener("orange-utils:navigate", handler);
+    return () => window.removeEventListener("orange-utils:navigate", handler);
+  }, []);
 
   return (
     <div className="h-screen flex bg-background text-foreground">

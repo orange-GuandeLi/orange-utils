@@ -199,10 +199,15 @@ export function useIframeSelector({
         overlayRef.current.overlay.remove();
         overlayRef.current.label.remove();
         overlayRef.current.breadcrumb.remove();
-      } catch {}
+      } catch { /* overlay already removed */ }
     }
     overlayRef.current = null;
   }, [iframeRef]);
+
+  // refs 打破 selectElement <-> renderBreadcrumb 循环依赖
+  const selectElementRef = useRef<(el: HTMLElement, iframe: HTMLIFrameElement) => void>(() => {});
+  const updateHighlightRef = useRef<(el: HTMLElement, iframe: HTMLIFrameElement) => void>(() => {});
+  const renderBreadcrumbRef = useRef<(breadcrumb: HTMLDivElement, domPath: HTMLElement[], iframe: HTMLIFrameElement) => void>(() => {});
 
   // 选中某个元素并锁定
   const selectElement = useCallback(
@@ -221,7 +226,7 @@ export function useIframeSelector({
       onSelected(info);
 
       // 更新面包屑
-      renderBreadcrumb(els.breadcrumb, info.domPath, iframe);
+      renderBreadcrumbRef.current(els.breadcrumb, info.domPath, iframe);
 
       console.group(
         "%c[HTML Selector] Element Selected",
@@ -242,6 +247,8 @@ export function useIframeSelector({
     },
     [onSelected],
   );
+
+  selectElementRef.current = selectElement;
 
   // 渲染面包屑
   const renderBreadcrumb = useCallback(
@@ -270,14 +277,16 @@ export function useIframeSelector({
         });
         chip.addEventListener("click", (e) => {
           e.stopPropagation();
-          selectElement(el, iframe);
-          updateHighlight(el, iframe);
+          selectElementRef.current(el, iframe);
+          updateHighlightRef.current(el, iframe);
         });
         breadcrumb.appendChild(chip);
       });
     },
-    [selectElement],
+    [],
   );
+
+  renderBreadcrumbRef.current = renderBreadcrumb;
 
   // 更新高亮位置
   const updateHighlight = useCallback(
@@ -332,6 +341,8 @@ export function useIframeSelector({
     [],
   );
 
+  updateHighlightRef.current = updateHighlight;
+
   useEffect(() => {
     const iframe = iframeRef.current;
     if (!iframe || !selectMode) {
@@ -380,7 +391,7 @@ export function useIframeSelector({
         rafId = null;
         const tracked = trackedElRef.current;
         if (!tracked || !overlayRef.current) return;
-        updateHighlight(tracked, iframe);
+        updateHighlightRef.current(tracked, iframe);
       });
     };
 
@@ -389,11 +400,11 @@ export function useIframeSelector({
 
     const updateForEl = (el: HTMLElement) => {
       trackedElRef.current = el;
-      updateHighlight(el, iframe);
+      updateHighlightRef.current(el, iframe);
 
       // 更新面包屑
       const path = getDomPath(el);
-      renderBreadcrumb(breadcrumb, path, iframe);
+      renderBreadcrumbRef.current(breadcrumb, path, iframe);
     };
 
     const handleMove = (e: MouseEvent) => {
@@ -424,7 +435,7 @@ export function useIframeSelector({
       if (isLockedRef.current) return;
       const el = trackedElRef.current;
       if (!el) return;
-      selectElement(el, iframe);
+      selectElementRef.current(el, iframe);
     };
 
     const handleKey = (e: KeyboardEvent) => {

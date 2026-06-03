@@ -69,14 +69,17 @@ export function ResourceManager() {
       for (const group of TOOL_GROUPS) {
         if (key.startsWith(group.prefix)) {
           const item = await kvGet(key);
-          if (item) grouped[group.id].push({ _key: key, ...((item as object) || {}) });
+          if (item)
+            grouped[group.id].push({ _key: key, ...((item as object) || {}) });
         }
       }
     }
     // 按 savedAt 降序
     for (const group of TOOL_GROUPS) {
       grouped[group.id].sort(
-        (a, b) => ((b as { savedAt?: number }).savedAt || 0) - ((a as { savedAt?: number }).savedAt || 0)
+        (a, b) =>
+          ((b as { savedAt?: number }).savedAt || 0) -
+          ((a as { savedAt?: number }).savedAt || 0),
       );
     }
     setAllItems(grouped);
@@ -109,9 +112,14 @@ export function ResourceManager() {
     if (detailItem.tool === "api-request") {
       const api = d as ApiSavedItem;
       return JSON.stringify(
-        { method: api.method, url: api.url, headers: api.headers, body: api.body },
+        {
+          method: api.method,
+          url: api.url,
+          headers: api.headers,
+          body: api.body,
+        },
         null,
-        2
+        2,
       );
     }
     return JSON.stringify(d, null, 2);
@@ -122,7 +130,6 @@ export function ResourceManager() {
     return "json";
   };
 
-  const currentGroup = TOOL_GROUPS.find((g) => g.id === activeTab)!;
   const currentItems = allItems[activeTab] || [];
 
   return (
@@ -131,9 +138,7 @@ export function ResourceManager() {
       <header className="h-14 border-b border-separator flex items-center px-5 gap-2 shrink-0">
         <Database size={16} className="text-accent" />
         <h1 className="text-sm font-semibold">资源管理</h1>
-        <span className="text-xs text-muted">
-          统一管理所有工具保存的数据
-        </span>
+        <span className="text-xs text-muted">统一管理所有工具保存的数据</span>
         <div className="flex-1" />
         <Chip size="sm" variant="soft" color="default">
           <Chip.Label>
@@ -145,7 +150,7 @@ export function ResourceManager() {
       {/* Main */}
       <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
         <Tabs
-          className="flex-1 min-h-0 flex flex-col"
+          className="flex-1 min-h-0 flex flex-col mt-2"
           defaultSelectedKey={activeTab}
           onSelectionChange={(key) => {
             if (key) setActiveTab(key as string);
@@ -186,109 +191,101 @@ export function ResourceManager() {
               {currentItems.length === 0 ? (
                 <div className="flex flex-col items-center justify-center h-64 text-muted gap-3">
                   <group.icon size={32} className="opacity-30" />
-                  <p className="text-sm">
-                    {group.name} 暂无保存的资源
-                  </p>
+                  <p className="text-sm">{group.name} 暂无保存的资源</p>
                 </div>
               ) : (
                 <div className="grid gap-3">
-                  {(currentItems as (Record<string, unknown> & { _key: string })[]).map(
-                    (item) => {
-                      const savedAt = item.savedAt as number | undefined;
-                      const name = (item.name as string) || item._key;
-                      const isApi = group.id === "api-request";
-                      const method = isApi ? (item.method as string) : null;
-                      const url = isApi ? (item.url as string) : null;
+                  {(
+                    currentItems as (Record<string, unknown> & {
+                      _key: string;
+                    })[]
+                  ).map((item) => {
+                    const savedAt = item.savedAt as number | undefined;
+                    const name = (item.name as string) || item._key;
+                    const isApi = group.id === "api-request";
+                    const method = isApi ? (item.method as string) : null;
+                    const url = isApi ? (item.url as string) : null;
 
-                      return (
-                        <div
-                          key={item._key}
-                          className="flex items-center gap-4 p-4 rounded-xl bg-surface border border-separator hover:border-accent/30 transition-colors group"
-                        >
-                          {/* 左侧信息 */}
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2">
-                              {method && (
-                                <Chip
-                                  size="sm"
-                                  variant="soft"
-                                  color="accent"
-                                >
-                                  <Chip.Label className="font-mono text-xs">
-                                    {method}
-                                  </Chip.Label>
-                                </Chip>
-                              )}
-                              <span className="text-sm font-medium truncate">
-                                {name}
-                              </span>
-                            </div>
-                            {url && (
-                              <p className="text-xs text-muted truncate mt-1 font-mono">
-                                {url}
-                              </p>
+                    return (
+                      <div
+                        key={item._key}
+                        className="flex items-center gap-4 p-4 rounded-xl bg-surface border border-separator hover:border-accent/30 transition-colors group"
+                      >
+                        {/* 左侧信息 */}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            {method && (
+                              <Chip size="sm" variant="soft" color="accent">
+                                <Chip.Label className="font-mono text-xs">
+                                  {method}
+                                </Chip.Label>
+                              </Chip>
                             )}
-                            <div className="flex items-center gap-1.5 mt-1.5 text-xs text-muted">
-                              <Clock size={11} />
-                              {savedAt
-                                ? new Date(savedAt).toLocaleString()
-                                : "未知时间"}
-                            </div>
+                            <span className="text-sm font-medium truncate">
+                              {name}
+                            </span>
                           </div>
-
-                          {/* 右侧操作 */}
-                          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <Tooltip delay={0}>
-                              <Button
-                                isIconOnly
-                                size="sm"
-                                variant="ghost"
-                                onPress={() =>
-                                  handleViewDetail(
-                                    group.id,
-                                    item._key,
-                                    item
-                                  )
-                                }
-                              >
-                                <Eye size={14} />
-                              </Button>
-                              <Tooltip.Content>查看详情</Tooltip.Content>
-                            </Tooltip>
-                            <Tooltip delay={0}>
-                              <Button
-                                isIconOnly
-                                size="sm"
-                                variant="ghost"
-                                onPress={() => {
-                                  // 跳转到对应工具（通过自定义事件通知 App 切换）
-                                  window.dispatchEvent(
-                                    new CustomEvent("orange-utils:navigate", {
-                                      detail: group.id,
-                                    })
-                                  );
-                                }}
-                              >
-                                <ExternalLink size={14} />
-                              </Button>
-                              <Tooltip.Content>打开工具</Tooltip.Content>
-                            </Tooltip>
-                            <Tooltip delay={0}>
-                              <Button
-                                isIconOnly
-                                size="sm"
-                                variant="ghost"
-                                onPress={() => handleDelete(item._key)}
-                              >
-                                <Trash2 size={14} className="text-danger" />
-                              </Button>
-                              <Tooltip.Content>删除</Tooltip.Content>
-                            </Tooltip>
+                          {url && (
+                            <p className="text-xs text-muted truncate mt-1 font-mono">
+                              {url}
+                            </p>
+                          )}
+                          <div className="flex items-center gap-1.5 mt-1.5 text-xs text-muted">
+                            <Clock size={11} />
+                            {savedAt
+                              ? new Date(savedAt).toLocaleString()
+                              : "未知时间"}
                           </div>
                         </div>
-                      );
-                    }
-                  )}
+
+                        {/* 右侧操作 */}
+                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <Tooltip delay={0}>
+                            <Button
+                              isIconOnly
+                              size="sm"
+                              variant="ghost"
+                              onPress={() =>
+                                handleViewDetail(group.id, item._key, item)
+                              }
+                            >
+                              <Eye size={14} />
+                            </Button>
+                            <Tooltip.Content>查看详情</Tooltip.Content>
+                          </Tooltip>
+                          <Tooltip delay={0}>
+                            <Button
+                              isIconOnly
+                              size="sm"
+                              variant="ghost"
+                              onPress={() => {
+                                // 跳转到对应工具（通过自定义事件通知 App 切换）
+                                window.dispatchEvent(
+                                  new CustomEvent("orange-utils:navigate", {
+                                    detail: group.id,
+                                  }),
+                                );
+                              }}
+                            >
+                              <ExternalLink size={14} />
+                            </Button>
+                            <Tooltip.Content>打开工具</Tooltip.Content>
+                          </Tooltip>
+                          <Tooltip delay={0}>
+                            <Button
+                              isIconOnly
+                              size="sm"
+                              variant="ghost"
+                              onPress={() => handleDelete(item._key)}
+                            >
+                              <Trash2 size={14} className="text-danger" />
+                            </Button>
+                            <Tooltip.Content>删除</Tooltip.Content>
+                          </Tooltip>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </Tabs.Panel>
@@ -307,8 +304,8 @@ export function ResourceManager() {
               </Modal.Icon>
               <Modal.Heading>
                 {detailItem
-                  ? ((detailItem.data as Record<string, unknown>).name as string) ||
-                    "资源详情"
+                  ? ((detailItem.data as Record<string, unknown>)
+                      .name as string) || "资源详情"
                   : "资源详情"}
               </Modal.Heading>
             </Modal.Header>
@@ -322,10 +319,7 @@ export function ResourceManager() {
               </div>
             </Modal.Body>
             <Modal.Footer>
-              <Button
-                slot="close"
-                variant="secondary"
-              >
+              <Button slot="close" variant="secondary">
                 关闭
               </Button>
               {detailItem && (

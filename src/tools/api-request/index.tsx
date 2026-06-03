@@ -82,7 +82,7 @@ export function ApiRequest() {
       const resHeaders: Record<string, string> = {};
       res.headers.forEach((v, k) => { resHeaders[k] = v; });
       let resBody = await res.text();
-      try { resBody = JSON.stringify(JSON.parse(resBody), null, 2); } catch {}
+      try { resBody = JSON.stringify(JSON.parse(resBody), null, 2); } catch { /* not JSON */ }
       setResponse({ status: res.status, statusText: res.statusText, headers: resHeaders, body: resBody, time });
     } catch (err) {
       setError(err instanceof Error ? err.message : "请求失败");

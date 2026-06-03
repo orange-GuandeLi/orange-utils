@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { Button, Chip, Tooltip, Modal, Tabs } from "@heroui/react";
 import {
   Database,
@@ -8,8 +8,10 @@ import {
   Code2,
   Send,
   Clock,
+  Download,
+  Upload,
 } from "lucide-react";
-import { kvGet, kvDelete, kvKeys } from "../../utils/db";
+import { kvGet, kvSet, kvDelete, kvKeys } from "../../utils/db";
 import { CodeEditor } from "../../components/CodeEditor";
 
 // ---- 数据类型 ----
@@ -57,6 +59,13 @@ export function ResourceManager() {
     data: unknown;
   } | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
+  const [importModalOpen, setImportModalOpen] = useState(false);
+  const [importPreview, setImportPreview] = useState<{
+    count: number;
+    keys: string[];
+    raw: Record<string, unknown>;
+  } | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // 加载所有保存的资源
   const loadAll = useCallback(async () => {
@@ -130,6 +139,92 @@ export function ResourceManager() {
     return "json";
   };
 
+  // ---- 导出 ----
+  const handleExport = async () => {
+    const keys = await kvKeys();
+    const data: Record<string, unknown> = {};
+    for (const key of keys) {
+      // 只导出工具保存的数据（带 :saved: 前缀的）
+      if (TOOL_GROUPS.some((g) => key.startsWith(g.prefix))) {
+        const value = await kvGet(key);
+        if (value !== undefined) data[key] = value;
+      }
+    }
+    const blob = new Blob([JSON.stringify(data, null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `orange-utils-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // ---- 导入 ----
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const raw = JSON.parse(reader.result as string) as Record<
+          string,
+          unknown
+        >;
+        // 只保留合法的工具数据 key
+        const validKeys = Object.keys(raw).filter((k) =>
+          TOOL_GROUPS.some((g) => k.startsWith(g.prefix)),
+        );
+        setImportPreview({
+          count: validKeys.length,
+          keys: validKeys,
+          raw,
+        });
+        setImportModalOpen(true);
+      } catch {
+        alert("文件格式错误，请选择有效的 JSON 文件");
+      }
+    };
+    reader.readAsText(file);
+    // 清空 input 以便重复选择同一文件
+    e.target.value = "";
+  };
+
+  const handleImportConfirm = async (mode: "merge" | "overwrite") => {
+    if (!importPreview) return;
+    const { raw } = importPreview;
+
+    if (mode === "overwrite") {
+      // 先删除现有数据
+      const keys = await kvKeys();
+      for (const key of keys) {
+        if (TOOL_GROUPS.some((g) => key.startsWith(g.prefix))) {
+          await kvDelete(key);
+        }
+      }
+    }
+
+    // 写入导入数据
+    for (const [key, value] of Object.entries(raw)) {
+      if (TOOL_GROUPS.some((g) => key.startsWith(g.prefix))) {
+        if (mode === "merge") {
+          // 合并模式：只写入不存在的 key
+          const existing = await kvGet(key);
+          if (existing === undefined) {
+            await kvSet(key, value);
+          }
+        } else {
+          await kvSet(key, value);
+        }
+      }
+    }
+
+    setImportModalOpen(false);
+    setImportPreview(null);
+    loadAll();
+  };
+
   const currentItems = allItems[activeTab] || [];
 
   return (
@@ -145,6 +240,35 @@ export function ResourceManager() {
             共 {Object.values(allItems).flat().length} 条资源
           </Chip.Label>
         </Chip>
+        <Tooltip delay={0}>
+          <Button
+            size="sm"
+            variant="ghost"
+            onPress={handleExport}
+          >
+            <Download size={14} />
+            <span className="text-xs">导出</span>
+          </Button>
+          <Tooltip.Content>导出所有资源为 JSON 文件</Tooltip.Content>
+        </Tooltip>
+        <Tooltip delay={0}>
+          <Button
+            size="sm"
+            variant="ghost"
+            onPress={() => fileInputRef.current?.click()}
+          >
+            <Upload size={14} />
+            <span className="text-xs">导入</span>
+          </Button>
+          <Tooltip.Content>从 JSON 文件导入资源</Tooltip.Content>
+        </Tooltip>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".json"
+          className="hidden"
+          onChange={handleFileSelect}
+        />
       </header>
 
       {/* Main */}
@@ -259,7 +383,6 @@ export function ResourceManager() {
                               size="sm"
                               variant="ghost"
                               onPress={() => {
-                                // 跳转到对应工具（通过自定义事件通知 App 切换）
                                 window.dispatchEvent(
                                   new CustomEvent("orange-utils:navigate", {
                                     detail: group.id,
@@ -331,6 +454,69 @@ export function ResourceManager() {
                   删除
                 </Button>
               )}
+            </Modal.Footer>
+          </Modal.Dialog>
+        </Modal.Container>
+      </Modal.Backdrop>
+
+      {/* 导入确认 Modal */}
+      <Modal.Backdrop isOpen={importModalOpen} onOpenChange={setImportModalOpen}>
+        <Modal.Container>
+          <Modal.Dialog className="sm:max-w-md">
+            <Modal.CloseTrigger />
+            <Modal.Header>
+              <Modal.Icon className="bg-success-soft text-success">
+                <Upload className="size-5" />
+              </Modal.Icon>
+              <Modal.Heading>导入资源</Modal.Heading>
+            </Modal.Header>
+            <Modal.Body>
+              {importPreview && (
+                <div className="space-y-4">
+                  <p className="text-sm text-muted">
+                    检测到{" "}
+                    <span className="text-foreground font-medium">
+                      {importPreview.count}
+                    </span>{" "}
+                    条资源数据：
+                  </p>
+                  <div className="max-h-40 overflow-y-auto rounded-lg bg-surface-secondary divide-y divide-separator">
+                    {importPreview.keys.map((key) => (
+                      <div
+                        key={key}
+                        className="px-3 py-2 text-xs font-mono text-muted"
+                      >
+                        {key}
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-xs text-muted">
+                    请选择导入模式：
+                  </p>
+                </div>
+              )}
+            </Modal.Body>
+            <Modal.Footer>
+              <Button
+                slot="close"
+                variant="secondary"
+              >
+                取消
+              </Button>
+              <Button
+                slot="close"
+                variant="ghost"
+                onPress={() => handleImportConfirm("merge")}
+              >
+                合并导入
+              </Button>
+              <Button
+                slot="close"
+                variant="primary"
+                onPress={() => handleImportConfirm("overwrite")}
+              >
+                覆盖导入
+              </Button>
             </Modal.Footer>
           </Modal.Dialog>
         </Modal.Container>

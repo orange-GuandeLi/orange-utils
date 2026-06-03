@@ -1,9 +1,10 @@
 import { useState, useEffect } from "react";
 import { Button, Tooltip } from "@heroui/react";
-import { Code2, Wrench, PanelLeftClose, PanelLeft, Send, Database } from "lucide-react";
+import { Code2, Wrench, PanelLeftClose, PanelLeft, Send, Database, GitCompareArrows } from "lucide-react";
 import { HtmlSelector } from "./tools/html-selector";
 import { ApiRequest } from "./tools/api-request";
 import { ResourceManager } from "./tools/resource-manager";
+import { CodeCompare } from "./tools/code-compare";
 
 const TOOLS = [
   {
@@ -26,6 +27,13 @@ const TOOLS = [
     description: "统一管理所有工具保存的数据",
     icon: Database,
     component: ResourceManager,
+  },
+  {
+    id: "code-compare",
+    name: "代码对比",
+    description: "对比两份代码，高亮差异",
+    icon: GitCompareArrows,
+    component: CodeCompare,
   },
 ];
 
